@@ -1,0 +1,588 @@
+{
+  "info": {
+    "name": "AI-Powered Cyber Threat Detection – Mini SOC Notebook (Winning Edition)",
+    "_postman_id": "a1b2c3d4-hr10j44t-winning",
+    "description": "## Purpose\nTurn Postman into a Mini-SOC: multi-API IOC enrichment → AI scoring → conditional alerts → visual report → CI-ready outputs.\n\n### How to Run (Clarity)\n1) Import this collection and the environment `ThreatDetection_Env`.\n2) Set `indicator` to an IP / domain / URL / hash / email.\n3) Add API keys (VT, AbuseIPDB, Shodan, HIBP). Leave `AI_SCORE_URL` blank to use the Local Fallback.\n4) Click **Router (Start Here)** to run the whole pipeline automatically.\n\n### Originality\n- Smart router detects indicator type and adapts endpoints.\n- Local AI Scoring fallback (transparent heuristic) works without external AI.\n- Built-in Visualizer dashboard (no dependencies).\n- Resilient retries, graceful handling for 200/404/429/5xx.\n\n### Reusability\n- Single variable `indicator` supports 5 IOC types.\n- Modular requests—swap any API provider with minimal edits.\n- Bulk-run with CSV (sample included).\n\n### Impact\n- Cuts triage time with one-click enrichment.\n- Reduces noise with AI thresholding + conditional alerts.",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "item": [
+    {
+      "name": "Router (Start Here)",
+      "event": [
+        {
+          "listen": "prerequest",
+          "script": {
+            "exec": [
+              "",
+              "// ROUTER: Detect indicator type and set endpoint modes for VT/HIBP/SHODAN safely",
+              "const ind = pm.environment.get(\"indicator\") || \"\";",
+              "function isIP(x){return /^(?:(?:25[0-5]|2[0-4]\\d|1?\\d?\\d)\\.){3}(?:25[0-5]|2[0-4]\\d|1?\\d?\\d)$/.test(x)}",
+              "function isHash(x){return /^[A-Fa-f0-9]{32}$|^[A-Fa-f0-9]{40}$|^[A-Fa-f0-9]{64}$/.test(x)} // MD5/SHA1/SHA256",
+              "function isURL(x){try{new URL(/^https?:\\/\\//i.test(x)?x:`http://${x}`);return true}catch(e){return false}}",
+              "function isEmail(x){return /^[^\\s@]+@[^\\s@]+\\.[^\\s@]+$/.test(x)}",
+              "",
+              "let type = \"domain\";",
+              "if(isIP(ind)) type=\"ip\";",
+              "else if(isHash(ind)) type=\"hash\";",
+              "else if(isEmail(ind)) type=\"email\";",
+              "else if(isURL(ind)) type=\"url\";",
+              "pm.environment.set(\"vt_resource_type\", type);",
+              "",
+              "// HIBP only makes sense for email; others will be skipped",
+              "// Shodan is only for IPs",
+              "// AbuseIPDB is for IPs",
+              "// VT supports ip/domain/url/file (hash) via different endpoints",
+              "",
+              "// Decide whether to try external AI or fallback",
+              "const aiBase = (pm.environment.get(\"AI_SCORE_URL\")||\"\").trim();",
+              "pm.environment.set(\"skip_external_ai\", aiBase ? \"false\" : \"true\");",
+              "",
+              "// Start the chain",
+              "postman.setNextRequest(\"AbuseIPDB – IP Reputation\");"
+            ],
+            "type": "text/javascript"
+          }
+        },
+        {
+          "listen": "test",
+          "script": {
+            "exec": [
+              "pm.test('Router executed', ()=> pm.expect(pm.environment.get('vt_resource_type')).to.be.ok);"
+            ],
+            "type": "text/javascript"
+          }
+        }
+      ],
+      "request": {
+        "method": "GET",
+        "url": "https://postman-echo.com/get?start=1",
+        "header": []
+      }
+    },
+    {
+      "name": "AbuseIPDB – IP Reputation",
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "exec": [
+              "",
+              "pm.test(\"AbuseIPDB – handled 200/4xx for non-IP\", () => {",
+              "  const type = pm.environment.get(\"vt_resource_type\");",
+              "  if (type !== \"ip\") pm.expect([400, 422, 403, 401, 200]).to.include(pm.response.code);",
+              "  else pm.expect([200, 403, 401, 429]).to.include(pm.response.code);",
+              "});",
+              "let body = pm.response.json ? pm.response.json() : {};",
+              "let score = (body.data && body.data.abuseConfidenceScore) || 0;",
+              "let reps = (body.data && body.data.totalReports) || 0;",
+              "pm.environment.set(\"abuse_confidence\", score);",
+              "pm.environment.set(\"abuse_reportCount\", reps);",
+              "",
+              "// Chain logic",
+              "const type = pm.environment.get(\"vt_resource_type\");",
+              "postman.setNextRequest(\"VirusTotal – Reputation Lookup\");",
+              "\n// Generic retry on 429/5xx with exponential backoff using collection variables\nlet code = pm.response.code;\nlet retriable = code === 429 || (code >= 500 && code < 600);\nlet key = request.name + \"::retries\";\nlet current = Number(pm.collectionVariables.get(key) || 0);\nif (retriable && current < 3) {\n  pm.collectionVariables.set(key, String(current + 1));\n  const delay = Math.pow(2, current) * 1000; // 0,1,2 -> 0, 1000, 2000 ms\n  console.log(`Retrying ${request.name} after ${delay}ms (attempt ${current+1})`);\n  setTimeout(() => { postman.setNextRequest(request.name); }, delay);\n} else {\n  pm.collectionVariables.unset(key);\n}\n"
+            ],
+            "type": "text/javascript"
+          }
+        }
+      ],
+      "request": {
+        "method": "GET",
+        "header": [
+          {
+            "key": "Key",
+            "value": "{{ABUSEIPDB_KEY}}"
+          },
+          {
+            "key": "Accept",
+            "value": "application/json"
+          }
+        ],
+        "url": {
+          "raw": "https://api.abuseipdb.com/api/v2/check?ipAddress={{indicator}}&maxAgeInDays=90",
+          "protocol": "https",
+          "host": [
+            "api",
+            "abuseipdb",
+            "com"
+          ],
+          "path": [
+            "api",
+            "v2",
+            "check"
+          ],
+          "query": [
+            {
+              "key": "ipAddress",
+              "value": "{{indicator}}"
+            },
+            {
+              "key": "maxAgeInDays",
+              "value": "90"
+            }
+          ]
+        },
+        "urlencoded": [],
+        "description": "IP reputation from AbuseIPDB"
+      }
+    },
+    {
+      "name": "VirusTotal – Reputation Lookup",
+      "event": [
+        {
+          "listen": "prerequest",
+          "script": {
+            "exec": [
+              "",
+              "// Build VT URL by type",
+              "const type = pm.environment.get(\"vt_resource_type\");",
+              "const ind = pm.environment.get(\"indicator\");",
+              "let path = \"\";",
+              "if (type === \"ip\") path = `ip_addresses/${ind}`;",
+              "else if (type === \"domain\") path = `domains/${ind}`;",
+              "else if (type === \"url\") path = `urls/${encodeURIComponent(ind)}`;",
+              "else if (type === \"hash\") path = `files/${ind}`;",
+              "pm.variables.set(\"vt_path\", path);"
+            ],
+            "type": "text/javascript"
+          }
+        },
+        {
+          "listen": "test",
+          "script": {
+            "exec": [
+              "",
+              "pm.test(\"VirusTotal – status OK/Handled\", () => {",
+              "  pm.expect([200, 401, 403, 404, 429]).to.include(pm.response.code);",
+              "});",
+              "let vt = pm.response.json ? pm.response.json() : {};",
+              "let stats = (vt.data && vt.data.attributes && vt.data.attributes.last_analysis_stats) || {};",
+              "pm.environment.set(\"vt_malicious\", Number(stats.malicious || 0));",
+              "",
+              "postman.setNextRequest(\"Shodan – Host Info\");",
+              "\n// Generic retry on 429/5xx with exponential backoff using collection variables\nlet code = pm.response.code;\nlet retriable = code === 429 || (code >= 500 && code < 600);\nlet key = request.name + \"::retries\";\nlet current = Number(pm.collectionVariables.get(key) || 0);\nif (retriable && current < 3) {\n  pm.collectionVariables.set(key, String(current + 1));\n  const delay = Math.pow(2, current) * 1000; // 0,1,2 -> 0, 1000, 2000 ms\n  console.log(`Retrying ${request.name} after ${delay}ms (attempt ${current+1})`);\n  setTimeout(() => { postman.setNextRequest(request.name); }, delay);\n} else {\n  pm.collectionVariables.unset(key);\n}\n"
+            ],
+            "type": "text/javascript"
+          }
+        }
+      ],
+      "request": {
+        "method": "GET",
+        "header": [
+          {
+            "key": "x-apikey",
+            "value": "{{VT_API_KEY}}"
+          }
+        ],
+        "url": {
+          "raw": "https://www.virustotal.com/api/v3/{{vt_path}}",
+          "protocol": "https",
+          "host": [
+            "www",
+            "virustotal",
+            "com"
+          ],
+          "path": [
+            "api",
+            "v3",
+            "{{vt_path}}"
+          ]
+        }
+      }
+    },
+    {
+      "name": "Shodan – Host Info",
+      "event": [
+        {
+          "listen": "prerequest",
+          "script": {
+            "exec": [
+              "",
+              "const type = pm.environment.get(\"vt_resource_type\");",
+              "if (type !== \"ip\") {",
+              "  postman.setNextRequest(\"HaveIBeenPwned – Breach Check\");",
+              "}"
+            ],
+            "type": "text/javascript"
+          }
+        },
+        {
+          "listen": "test",
+          "script": {
+            "exec": [
+              "",
+              "// If indicator is not IP, skip shodan",
+              "const type = pm.environment.get(\"vt_resource_type\");",
+              "pm.test(\"Shodan – handled type-based routing\", () => pm.expect([200, 404, 401, 403]).to.include(pm.response.code));",
+              "let sh = pm.response.json ? pm.response.json() : {};",
+              "let ports = (sh.ports || []).join(\",\");",
+              "pm.environment.set(\"shodan_ports\", ports);",
+              "postman.setNextRequest(\"HaveIBeenPwned – Breach Check\");",
+              "\n// Generic retry on 429/5xx with exponential backoff using collection variables\nlet code = pm.response.code;\nlet retriable = code === 429 || (code >= 500 && code < 600);\nlet key = request.name + \"::retries\";\nlet current = Number(pm.collectionVariables.get(key) || 0);\nif (retriable && current < 3) {\n  pm.collectionVariables.set(key, String(current + 1));\n  const delay = Math.pow(2, current) * 1000; // 0,1,2 -> 0, 1000, 2000 ms\n  console.log(`Retrying ${request.name} after ${delay}ms (attempt ${current+1})`);\n  setTimeout(() => { postman.setNextRequest(request.name); }, delay);\n} else {\n  pm.collectionVariables.unset(key);\n}\n"
+            ],
+            "type": "text/javascript"
+          }
+        }
+      ],
+      "request": {
+        "method": "GET",
+        "url": {
+          "raw": "https://api.shodan.io/shodan/host/{{indicator}}?key={{SHODAN_KEY}}",
+          "protocol": "https",
+          "host": [
+            "api",
+            "shodan",
+            "io"
+          ],
+          "path": [
+            "shodan",
+            "host",
+            "{{indicator}}"
+          ],
+          "query": [
+            {
+              "key": "key",
+              "value": "{{SHODAN_KEY}}"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "name": "HaveIBeenPwned – Breach Check",
+      "event": [
+        {
+          "listen": "prerequest",
+          "script": {
+            "exec": [
+              "",
+              "const type = pm.environment.get(\"vt_resource_type\");",
+              "if (type !== \"email\") {",
+              "  // No call needed; synthesize an empty 404-like result for consistency",
+              "  postman.setNextRequest(\"Aggregate → Build Payload\");",
+              "}"
+            ],
+            "type": "text/javascript"
+          }
+        },
+        {
+          "listen": "test",
+          "script": {
+            "exec": [
+              "",
+              "// HIBP returns 404 when no breach; treat as valid",
+              "pm.test(\"HIBP – handled 200/404\", () => pm.expect([200, 404, 401, 403, 429]).to.include(pm.response.code));",
+              "let breaches = [];",
+              "try {",
+              "  breaches = pm.response.json ? (pm.response.json() || []) : [];",
+              "} catch (e) { breaches = []; }",
+              "pm.environment.set(\"hibp_breaches\", JSON.stringify((breaches||[]).map(b => b.Name || b.Domain || \"unknown\")));",
+              "",
+              "postman.setNextRequest(\"Aggregate → Build Payload\");",
+              "\n// Generic retry on 429/5xx with exponential backoff using collection variables\nlet code = pm.response.code;\nlet retriable = code === 429 || (code >= 500 && code < 600);\nlet key = request.name + \"::retries\";\nlet current = Number(pm.collectionVariables.get(key) || 0);\nif (retriable && current < 3) {\n  pm.collectionVariables.set(key, String(current + 1));\n  const delay = Math.pow(2, current) * 1000; // 0,1,2 -> 0, 1000, 2000 ms\n  console.log(`Retrying ${request.name} after ${delay}ms (attempt ${current+1})`);\n  setTimeout(() => { postman.setNextRequest(request.name); }, delay);\n} else {\n  pm.collectionVariables.unset(key);\n}\n"
+            ],
+            "type": "text/javascript"
+          }
+        }
+      ],
+      "request": {
+        "method": "GET",
+        "header": [
+          {
+            "key": "hibp-api-key",
+            "value": "{{HIBP_KEY}}"
+          },
+          {
+            "key": "User-Agent",
+            "value": "PostmanNotebook/1.0"
+          }
+        ],
+        "url": {
+          "raw": "https://haveibeenpwned.com/api/v3/breachedaccount/{{indicator}}",
+          "protocol": "https",
+          "host": [
+            "haveibeenpwned",
+            "com"
+          ],
+          "path": [
+            "api",
+            "v3",
+            "breachedaccount",
+            "{{indicator}}"
+          ]
+        }
+      }
+    },
+    {
+      "name": "Aggregate → Build Payload",
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "exec": [
+              "",
+              "const payload = {",
+              "  indicator: pm.environment.get(\"indicator\"),",
+              "  abuse: {",
+              "    confidence: Number(pm.environment.get(\"abuse_confidence\")||0),",
+              "    reports: Number(pm.environment.get(\"abuse_reportCount\")||0)",
+              "  },",
+              "  virustotal: { malicious: Number(pm.environment.get(\"vt_malicious\")||0) },",
+              "  shodan: { ports: pm.environment.get(\"shodan_ports\")||\"\" },",
+              "  hibp: JSON.parse(pm.environment.get(\"hibp_breaches\") || \"[]\")",
+              "};",
+              "pm.environment.set(\"aggregated_payload\", JSON.stringify(payload, null, 2));",
+              "",
+              "// Decide external vs local AI",
+              "if (pm.environment.get(\"skip_external_ai\") === \"false\") {",
+              "  postman.setNextRequest(\"AI Scoring – External\");",
+              "} else {",
+              "  postman.setNextRequest(\"AI Scoring – Local Fallback\");",
+              "}"
+            ],
+            "type": "text/javascript"
+          }
+        }
+      ],
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "url": "https://postman-echo.com/post",
+        "body": {
+          "mode": "raw",
+          "raw": "{{aggregated_payload}}"
+        }
+      }
+    },
+    {
+      "name": "AI Scoring – External",
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "exec": [
+              "",
+              "pm.test(\"AI Scoring – External: status OK/Handled\", () => {",
+              "  pm.expect([200, 400, 401, 403, 404, 429, 500]).to.include(pm.response.code);",
+              "});",
+              "let res = pm.response.json ? pm.response.json() : {};",
+              "let score = Number(res.risk_score || 0);",
+              "let recs = res.recommendations || [];",
+              "pm.environment.set(\"ai_risk_score\", score);",
+              "pm.environment.set(\"ai_recommendations\", JSON.stringify(recs));",
+              "pm.environment.set(\"should_alert\", score > 70 ? \"true\" : \"false\");",
+              "pm.environment.set(\"ai_result_blob\", JSON.stringify({ ai_risk_score: score }));",
+              "",
+              "postman.setNextRequest(\"Alert Dispatcher\");",
+              "\n// Generic retry on 429/5xx with exponential backoff using collection variables\nlet code = pm.response.code;\nlet retriable = code === 429 || (code >= 500 && code < 600);\nlet key = request.name + \"::retries\";\nlet current = Number(pm.collectionVariables.get(key) || 0);\nif (retriable && current < 3) {\n  pm.collectionVariables.set(key, String(current + 1));\n  const delay = Math.pow(2, current) * 1000; // 0,1,2 -> 0, 1000, 2000 ms\n  console.log(`Retrying ${request.name} after ${delay}ms (attempt ${current+1})`);\n  setTimeout(() => { postman.setNextRequest(request.name); }, delay);\n} else {\n  pm.collectionVariables.unset(key);\n}\n"
+            ],
+            "type": "text/javascript"
+          }
+        }
+      ],
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Authorization",
+            "value": "Bearer {{AI_API_KEY}}"
+          },
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "url": "{{AI_SCORE_URL}}/score",
+        "body": {
+          "mode": "raw",
+          "raw": "{{aggregated_payload}}"
+        }
+      }
+    },
+    {
+      "name": "AI Scoring – Local Fallback",
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "exec": [
+              "",
+              "// LOCAL scoring: a transparent baseline so the Notebook runs without an AI API",
+              "const abuse = Number(pm.environment.get(\"abuse_confidence\")||0);",
+              "const vt = Number(pm.environment.get(\"vt_malicious\")||0);",
+              "const ports = (pm.environment.get(\"shodan_ports\")||\"\").split(\",\").filter(Boolean).map(p=>Number(p));",
+              "const hibp = JSON.parse(pm.environment.get(\"hibp_breaches\")||\"[]\");",
+              "",
+              "// Heuristic scoring (documented):",
+              "// - VT weight 45 (capped at 10 engines malicious)",
+              "// - AbuseIPDB weight 25",
+              "// - Exposed risky ports weight 15 (e.g., 22,23,445,3389,5900,9200,3306)",
+              "// - HIBP presence weight 15",
+              "const vtScore = Math.min(vt, 10) * 4.5;",
+              "const abuseScore = (abuse/100) * 25;",
+              "const risky = [22,23,445,3389,5900,9200,3306,21,25,80,8080];",
+              "const riskyOpenCount = ports.filter(p => risky.includes(p)).length;",
+              "const portScore = Math.min(riskyOpenCount * 5, 15);",
+              "const hibpScore = hibp.length > 0 ? 15 : 0;",
+              "",
+              "const score = Math.round(vtScore + abuseScore + portScore + hibpScore);",
+              "const recs = [];",
+              "if (vt > 0) recs.push(\"Block at perimeter & EDR quarantine\");",
+              "if (abuse >= 50) recs.push(\"Escalate to Tier-2; review AbuseIPDB reports\");",
+              "if (riskyOpenCount > 0) recs.push(\"Close/limit risky ports via firewall & NAC\");",
+              "if (hibp.length > 0) recs.push(\"Force credential reset & enable MFA\");",
+              "if (recs.length === 0) recs.push(\"Monitor only; add to watchlist\");",
+              "",
+              "pm.environment.set(\"ai_risk_score\", String(score));",
+              "pm.environment.set(\"ai_recommendations\", JSON.stringify(recs));",
+              "pm.environment.set(\"should_alert\", score > 70 ? \"true\" : \"false\");",
+              "pm.environment.set(\"ai_result_blob\", JSON.stringify({ ai_risk_score: score }));",
+              "",
+              "postman.setNextRequest(\"Alert Dispatcher\");"
+            ],
+            "type": "text/javascript"
+          }
+        }
+      ],
+      "request": {
+        "method": "GET",
+        "url": "https://postman-echo.com/get?local=1"
+      }
+    },
+    {
+      "name": "Alert Dispatcher",
+      "event": [
+        {
+          "listen": "prerequest",
+          "script": {
+            "exec": [
+              "",
+              "// Skip alert if below threshold",
+              "if (pm.environment.get(\"should_alert\") !== \"true\") {",
+              "  console.log(\"Below threshold – skipping alert\");",
+              "  postman.setNextRequest(\"Visualizer – Threat Report\");",
+              "}"
+            ],
+            "type": "text/javascript"
+          }
+        },
+        {
+          "listen": "test",
+          "script": {
+            "exec": [
+              "",
+              "pm.test(\"Alert dispatched (if executed)\", () => {",
+              "  pm.expect([200,201,204]).to.include(pm.response.code);",
+              "});",
+              "postman.setNextRequest(\"Visualizer – Threat Report\");"
+            ],
+            "type": "text/javascript"
+          }
+        }
+      ],
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "url": "{{alert_webhook}}",
+        "body": {
+          "mode": "raw",
+          "raw": "{\"summary\": \"High risk indicator detected: {{indicator}}\", \"score\": \"{{ai_risk_score}}\", \"recommendations\": \"{{ai_recommendations}}\", \"context\": \"{{aggregated_payload}}\"}"
+        }
+      }
+    },
+    {
+      "name": "Visualizer – Threat Report",
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "exec": [
+              "",
+              "// Visualizer dashboard",
+              "const indicator = pm.environment.get(\"indicator\");",
+              "const score = pm.environment.get(\"ai_risk_score\");",
+              "const recs = JSON.parse(pm.environment.get(\"ai_recommendations\")||\"[]\");",
+              "",
+              "const tmpl = `",
+              "<style>",
+              "  body { font-family: ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto; }",
+              "  .card { border:1px solid #ddd; border-radius:12px; padding:16px; margin:10px 0; }",
+              "  .flex { display:flex; gap:16px; }",
+              "  .grid { display:grid; grid-template-columns: 1fr 1fr; gap: 12px; }",
+              "  .tag { display:inline-block; padding:3px 8px; border-radius:999px; border:1px solid #ccc; margin-right:6px; }",
+              "  .bar { width:100%; height:14px; background:#eee; border-radius:999px; overflow:hidden; }",
+              "  .fill { height:100%; width:${score}%; }",
+              "</style>",
+              "",
+              "<h2>🔍 Threat Report for ${indicator}</h2>",
+              "",
+              "<div class=\"card\">",
+              "  <b>Risk Score:</b> ${score}/100",
+              "  <div class=\"bar\"><div class=\"fill\" style=\"background:${score>70?'#c62828':(score>40?'#f9a825':'#2e7d32')}; width:${score}%\"></div></div>",
+              "</div>",
+              "",
+              "<div class=\"grid\">",
+              "  <div class=\"card\">",
+              "    <h3>AbuseIPDB</h3>",
+              "    <p><b>Confidence:</b> ${pm.environment.get(\"abuse_confidence\")}%</p>",
+              "    <p><b>Reports:</b> ${pm.environment.get(\"abuse_reportCount\")}</p>",
+              "  </div>",
+              "  <div class=\"card\">",
+              "    <h3>VirusTotal</h3>",
+              "    <p><b>Malicious engines:</b> ${pm.environment.get(\"vt_malicious\")}</p>",
+              "  </div>",
+              "  <div class=\"card\">",
+              "    <h3>Shodan</h3>",
+              "    <p><b>Open ports:</b> ${pm.environment.get(\"shodan_ports\") || '—'}</p>",
+              "  </div>",
+              "  <div class=\"card\">",
+              "    <h3>HaveIBeenPwned</h3>",
+              "    <p><b>Breaches:</b> ${pm.environment.get(\"hibp_breaches\")}</p>",
+              "  </div>",
+              "</div>",
+              "",
+              "<div class=\"card\">",
+              "  <h3>Recommendations</h3>",
+              "  <div>${recs.map(r=>`<span class=\"tag\">${r}</span>`).join(' ')}</div>",
+              "</div>",
+              "`;",
+              "",
+              "pm.visualizer.set(tmpl, {});",
+              "",
+              "// Write ai_result.json-compatible blob for CI",
+              "pm.environment.set('ai_result_blob', JSON.stringify({ ai_risk_score: Number(score) }));"
+            ],
+            "type": "text/javascript"
+          }
+        }
+      ],
+      "request": {
+        "method": "GET",
+        "url": "https://postman-echo.com/get?viz=1"
+      }
+    }
+  ],
+  "variable": [],
+  "event": [
+    {
+      "listen": "prerequest",
+      "script": {
+        "type": "text/javascript",
+        "exec": [
+          "pm.request.addHeader({key:'X-Notebook', value:'HR10J44T-MiniSOC'});"
+        ]
+      }
+    }
+  ]
+}

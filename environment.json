@@ -1,0 +1,135 @@
+{
+  "id": "d1e3f3b0-hr10j44t-threatdetection-env",
+  "name": "ThreatDetection_Env",
+  "values": [
+    {
+      "key": "VT_API_KEY",
+      "value": "",
+      "type": "secret",
+      "enabled": true
+    },
+    {
+      "key": "ABUSEIPDB_KEY",
+      "value": "",
+      "type": "secret",
+      "enabled": true
+    },
+    {
+      "key": "SHODAN_KEY",
+      "value": "",
+      "type": "secret",
+      "enabled": true
+    },
+    {
+      "key": "HIBP_KEY",
+      "value": "",
+      "type": "secret",
+      "enabled": true
+    },
+    {
+      "key": "AI_SCORE_URL",
+      "value": "",
+      "type": "text",
+      "enabled": true
+    },
+    {
+      "key": "AI_API_KEY",
+      "value": "",
+      "type": "secret",
+      "enabled": true
+    },
+    {
+      "key": "indicator",
+      "value": "1.1.1.1",
+      "type": "text",
+      "enabled": true
+    },
+    {
+      "key": "default_timeout",
+      "value": "30000",
+      "type": "text",
+      "enabled": true
+    },
+    {
+      "key": "vt_resource_type",
+      "value": "",
+      "type": "text",
+      "enabled": true
+    },
+    {
+      "key": "abuse_confidence",
+      "value": "0",
+      "type": "text",
+      "enabled": true
+    },
+    {
+      "key": "abuse_reportCount",
+      "value": "0",
+      "type": "text",
+      "enabled": true
+    },
+    {
+      "key": "vt_malicious",
+      "value": "0",
+      "type": "text",
+      "enabled": true
+    },
+    {
+      "key": "shodan_ports",
+      "value": "",
+      "type": "text",
+      "enabled": true
+    },
+    {
+      "key": "hibp_breaches",
+      "value": "[]",
+      "type": "text",
+      "enabled": true
+    },
+    {
+      "key": "aggregated_payload",
+      "value": "{}",
+      "type": "text",
+      "enabled": true
+    },
+    {
+      "key": "ai_risk_score",
+      "value": "0",
+      "type": "text",
+      "enabled": true
+    },
+    {
+      "key": "ai_recommendations",
+      "value": "[]",
+      "type": "text",
+      "enabled": true
+    },
+    {
+      "key": "should_alert",
+      "value": "false",
+      "type": "text",
+      "enabled": true
+    },
+    {
+      "key": "ai_result_blob",
+      "value": "{}",
+      "type": "text",
+      "enabled": true
+    },
+    {
+      "key": "skip_external_ai",
+      "value": "false",
+      "type": "text",
+      "enabled": true
+    },
+    {
+      "key": "alert_webhook",
+      "value": "https://hooks.example.com/alert",
+      "type": "text",
+      "enabled": true
+    }
+  ],
+  "_postman_variable_scope": "environment",
+  "_postman_exported_at": "2025-09-07T06:29:07Z",
+  "_postman_exported_using": "Postman/Notebook-AI-ThreatDetection"
+}
